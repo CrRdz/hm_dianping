@@ -149,13 +149,13 @@ public class CacheClient {
         return r;
     }
 
-    private boolean tryLock(String key){
+    public boolean tryLock(String key){
         Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
         //直接返回flag自动拆箱可能会造成空指针异常，Boolean是boolean的包装类
         return BooleanUtil.isTrue(flag);
     }
 
-    private void unlock(String key){
+    public void unlock(String key){
         stringRedisTemplate.delete(key);
     }
 
