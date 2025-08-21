@@ -20,8 +20,12 @@ import org.springframework.stereotype.Service;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
 
+import java.io.FileWriter;
+import java.io.PrintWriter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.utils.RedisConstants.*;
@@ -41,6 +45,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private IUserService userService;
 
     @Override
     public Result sendCode(String phone, HttpSession session) {
@@ -113,5 +120,80 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         //2.保存用户
         save(user);
         return user;
+    }
+
+    public void batchInsertUsersToRedis() {
+        // 获取所有用户数据
+        List<User> users = userService.list();
+
+        for (User user : users) {
+            // 1. 生成token
+            String token = UUID.randomUUID().toString(true);
+
+            // 2. 转换用户对象为DTO
+            UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+
+            // 3. 转换为Map格式用于Hash存储
+            Map<String, Object> userMap = BeanUtil.beanToMap(userDTO, new HashMap<>(),
+                    CopyOptions.create()
+                            .setIgnoreNullValue(true)
+                            .setFieldValueEditor((fieldName, fieldValue) -> fieldValue.toString()));
+
+            // 4. 存储到Redis
+            String tokenKey = LOGIN_USER_KEY + token;
+            stringRedisTemplate.opsForHash().putAll(tokenKey, userMap);
+
+            // 5. 设置过期时间
+            stringRedisTemplate.expire(tokenKey, 36000L, TimeUnit.MINUTES);
+
+            // 记录token与用户ID的映射关系，方便查找
+            //stringRedisTemplate.opsForValue().set(LOGIN_USER_KEY + "id:" + user.getId(), token, LOGIN_USER_TTL, TimeUnit.MINUTES);
+        }
+    }
+
+    public void exportTokensFromRedisToFile() {
+        try {
+            // 指定输出文件
+            String tokenFilePath = "redis_tokens.txt";
+
+            // 清空文件内容
+            try (PrintWriter writer = new PrintWriter(new FileWriter(tokenFilePath, false))) {
+                writer.print("");
+            }
+
+            // 获取所有匹配的keys
+            Set<String> keys = stringRedisTemplate.keys(LOGIN_USER_KEY + "*");
+
+            if (keys == null || keys.isEmpty()) {
+                log.info("Redis中没有找到用户token数据");
+                return;
+            }
+
+            try (PrintWriter writer = new PrintWriter(new FileWriter(tokenFilePath, true))) {
+                for (String key : keys) {
+                    // 从Redis Hash中获取用户数据
+                    Map<Object, Object> userMap = stringRedisTemplate.opsForHash().entries(key);
+
+                    if (!userMap.isEmpty()) {
+                        // 提取用户信息
+                        String userId = (String) userMap.get("id");
+                        String phone = (String) userMap.get("phone");
+
+                        // 从key中提取token (去除前缀)
+                        String token = key.substring(LOGIN_USER_KEY.length());
+
+                        // 写入文件
+                        writer.println(token);
+
+                        log.debug("导出用户token: userId={}, token={}", userId,  token);
+                    }
+                }
+
+                log.info("共导出 {} 个用户token到文件 {}", keys.size(), tokenFilePath);
+            }
+
+        } catch (Exception e) {
+            log.error("从Redis导出token到文件失败", e);
+        }
     }
 }
