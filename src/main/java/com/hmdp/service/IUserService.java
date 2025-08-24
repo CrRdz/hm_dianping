@@ -24,4 +24,6 @@ public interface IUserService extends IService<User> {
     void batchInsertUsersToRedis();
 
     void exportTokensFromRedisToFile();
+
+    Result sign();
 }
