@@ -26,4 +26,6 @@ public interface IUserService extends IService<User> {
     void exportTokensFromRedisToFile();
 
     Result sign();
+
+    Result signCount();
 }
